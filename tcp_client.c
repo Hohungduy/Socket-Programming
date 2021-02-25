@@ -8,9 +8,18 @@
 #include <sys/types.h> 
 #include <unistd.h>
 
-#define PORT 4545
+#define PORT 4545 //set default (may be using argument)
+#define LOOPBACK_ADDRESS "127.0.0.1"
+#define SERVER_55_ADDRESS "172.16.32.55"
 #define SIZE 1024
+
+//Macro for comparing between two numbers
 #define min(a,b) (((a)<(b))?(a):(b))
+#define max(a,b) (((a)>(b))?(a):(b))
+
+//Boolean value
+#define TRUE 1  //Boolean value
+#define FALSE 0 //Boolean value
 FILE* open_file(const char *pathname, const char* mode)
 {
     FILE *fd;
@@ -24,7 +33,90 @@ FILE* open_file(const char *pathname, const char* mode)
     fseek(fd,0,SEEK_SET);
     return fd;
 }
-int read_data(int sockfd, void *buf, int buflen)
+/* ------------------------------------------------------------------*/
+/* Send data and file */
+int send_data(int sockfd, void *buf, int buflen)
+{
+    unsigned char *tmp_buf = (unsigned char *)buf;
+    int byteSent = 0;
+    int totByte = 0;// total byte sent
+    int totleft = buflen;
+    while(totleft > 0)
+    {
+        byteSent = send(sockfd,tmp_buf,buflen - totByte,0);
+        if(byteSent == 0)
+        {
+            return totByte;
+        }
+        else if(byteSent < 0)
+        {
+            printf("byte send < 0 \n");
+            return -1;//error
+        }
+        totleft -= byteSent;
+        totByte += byteSent;
+        tmp_buf += byteSent;
+    }
+    return totByte;
+}
+long int send_value(int sockfd, long value)
+{
+    value = htonl(value);
+    return send_data(sockfd, &value, sizeof(value));
+}
+int send_file(FILE *fd, int sockfd)
+{
+    /* Another way to find out file length:Using fseek setting
+     pointer to the end of data. Then, using ftell to find 
+    current pointer and finally, using rewind() to return the beginning of the file) */ 
+    char *buf = malloc(SIZE*sizeof(char));//max buf
+    long buflen = SIZE;
+    long filesize =0;
+    long totleft = 0;//remaining
+    // int i;
+    long numSend =0;
+
+    /* Finding file size */
+    fseek(fd, 0, SEEK_END);
+    filesize = ftell(fd);
+    rewind(fd);
+    if(filesize < 0)
+    {
+        printf("error: filesize < 0\n");
+        return -1;
+    }
+    printf("Size of file:%ld\n",filesize);
+    if(!send_value(sockfd,filesize))
+    {
+        printf("error: send_value < 0\n");
+        return -1;//error
+    }
+    totleft = filesize;
+    if(filesize > 0)
+    {
+        while(totleft > 0)
+        {
+            numSend = min(totleft,buflen);
+            numSend = fread(buf,1,numSend,fd);
+            if(numSend < 1)
+            {
+                printf("error: read file des into buf (<1)\n");
+                return numSend;
+            }
+            numSend = send_data(sockfd,buf,numSend);
+            if(numSend < 1){
+                printf("error: read file des into buf (<1)\n"); 
+                return numSend;
+            }
+            totleft -= numSend;
+        }
+    }
+    free(buf);
+    return filesize-totleft;
+}
+/* ------------------------------------------------------------------*/
+/* Receive file */
+int receive_data(int sockfd, void *buf, int buflen)
 {
     unsigned char *tmp_buf = (unsigned char *)buf;
     int byteRev = 0;
@@ -48,9 +140,9 @@ int read_data(int sockfd, void *buf, int buflen)
     return totByte;
 }
 
-int read_value(int sockfd, long *value)
+int receive_value(int sockfd, long *value)
 {
-    if(!read_data(sockfd,value,sizeof(value)))
+    if(!receive_data(sockfd,value,sizeof(value)))
         return 0;
     *value = ntohl(*value);
     return 1;
@@ -92,9 +184,9 @@ int receive_file(FILE *fd, int sockfd)
     long filesize =0;
     long totleft = 0;//remaining
     // int i;
-    long numRev =0;
+    long byteRev=0;
     
-    if(!read_value(sockfd,&filesize))
+    if(!receive_value(sockfd,&filesize))
     {
         printf("error when receving length of files\n");
         return -1;//error
@@ -107,20 +199,20 @@ int receive_file(FILE *fd, int sockfd)
     {
         while(totleft > 0)
         {
-            numRev = min(totleft,buflen);
-            numRev = read_data(sockfd,buf,numRev);
-            if(numRev < 1)
+            byteRev= min(totleft,buflen);
+            byteRev= receive_data(sockfd,buf,byteRev);
+            if(byteRev< 1)
             {
                 printf("error when receving data\n");    
-                return numRev;
+                return byteRev;
             }
-            numRev = write_file(fd,buf,numRev);
-            if(numRev < 1)
+            byteRev= write_file(fd,buf,byteRev);
+            if(byteRev< 1)
             {
                 printf("error when write data to the file\n");    
-                return numRev;
+                return byteRev;
             }
-            totleft -= numRev;
+            totleft -= byteRev;
         }
     }
     free(buf);
@@ -129,11 +221,14 @@ int receive_file(FILE *fd, int sockfd)
 
 int main(int argc, char const *argv[])
 {
+    // Argument 1: Using for IP Address
+    // Argument 2: Using for Port
     int sockfd = 0;
     struct sockaddr_in server_address;
     FILE *fd;
-    char IPv4Str[INET_ADDRSTRLEN] = "127.0.0.1";//loopback address
-    char IPv4Str2[INET_ADDRSTRLEN] = "172.16.32.55";//server address
+    char IPv4Str[INET_ADDRSTRLEN] = LOOPBACK_ADDRESS;//loopback address
+    char IPv4Str2[INET_ADDRSTRLEN] = SERVER_55_ADDRESS;//server address (using default). May be using argument
+
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         printf("\n Socket creation error \n");
         return -1;
