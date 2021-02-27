@@ -6,9 +6,14 @@
 #include <string.h>     // bzero
 #include <sys/types.h> 
 #include <unistd.h>
+#include <sys/time.h>
+#include <errno.h> 
+#include "switch.h"
 
 #define PORT 4545
 #define SIZE 1024 // Size of buffer
+#define TIMEOUT 20 // Timeout for select()
+#define CLIENT_NUMBER 30 //handle 30 clients
 
 //Macro for comparing between two numbers
 #define min(a,b) (((a)<(b))?(a):(b))
@@ -16,6 +21,14 @@
 
 #define TRUE 1  //Boolean value
 #define FALSE 0 //Boolean value
+
+typedef int (*run_func_t)(int server_fd, struct sockaddr *client_address, socklen_t *addrlen, char const *argv[]);
+run_func_t func_general;
+
+int run_server_select_func(int server_fd, struct sockaddr *client_address, socklen_t *addrlen, char const *argv[]);
+int run_normal_func(int server_fd, struct sockaddr *client_address, socklen_t *addrlen, char const *argv[]);
+
+
 /* Open file */
 FILE* open_file(const char *pathname, const char* mode)
 {
@@ -217,11 +230,157 @@ int receive_file(FILE *fd, int sockfd)
     free(buf);
     return filesize-totleft;
 }
-// void run_server_select_func(int server_fd, struct sockaddr *client_address, socklen_t *addrlen)
-// {
-//     char *message = "Hello from the server!";
-//     char *message
-// }
+
+int run_server_select_func(int server_fd, struct sockaddr *client_address, socklen_t *addrlen, char const *argv[])
+{
+    char *message = "Hello from the server!";
+    char *message2 = "Concurrent server using select() mode!";
+    int num_sockfd = CLIENT_NUMBER; //30 client
+    int max_sockfd = 0;
+    int con_sockfd[num_sockfd];
+    int byteSend =0;
+    struct timeval time_out;
+    fd_set writefds;
+    fd_set readfds; // for future use
+    int i;//index
+    FILE *fd;
+    int ret;
+    
+    char IPv4Str[INET_ADDRSTRLEN];
+    //init array
+    for(i =0 ; i < num_sockfd; i++)
+    {
+        con_sockfd[i] = 0;
+    }
+    while(1)
+    {
+        // Init list of descriptor for writing
+        FD_ZERO(&readfds);
+        FD_SET(server_fd,&readfds);
+        max_sockfd = server_fd;
+        // Init timeout
+        time_out.tv_sec = TIMEOUT;
+        time_out.tv_usec = 0;
+        for(i=0; i < num_sockfd; i++)
+        {
+            if(con_sockfd[i] < 0)
+                return 0;
+            else if(con_sockfd[i] > 0)
+                FD_SET(con_sockfd[i],&readfds);
+            if (con_sockfd[i] > max_sockfd)
+                max_sockfd = con_sockfd[i];
+        }
+        //wait for the activity on one of the sockets
+        ret = select(max_sockfd + 1, &readfds, NULL, NULL,&time_out);
+        if ((ret == -1) && (errno!=EINTR))
+        {
+            perror("error when using select()");
+            exit(EXIT_FAILURE);
+        }
+        else if (ret == 0)
+        {
+            printf("timeout after %ld seconds!",time_out.tv_sec);
+            return 0;
+        }
+        //If st happened on the master socket, then its an incoming connection
+        if(FD_ISSET(server_fd, &readfds))
+        {
+        for(i =0 ; i < num_sockfd; i++)
+            {
+            if(!con_sockfd[i])
+            {
+                con_sockfd[i] = accept(server_fd, (struct sockaddr *)client_address,(socklen_t*)addrlen);
+                if(con_sockfd[i] < 0)
+                {
+                    perror("[-]refuse(accept)");
+                    exit(EXIT_FAILURE);
+                }
+                            //print information
+                inet_ntop(AF_INET,&(((struct sockaddr_in *)client_address)->sin_addr),IPv4Str,INET_ADDRSTRLEN);
+                printf("Client address IP:%s - port:%d\n",IPv4Str, htons(((struct sockaddr_in *)client_address)->sin_port));
+                printf("socket file descriptor:%d \n\n\n",con_sockfd[i]);
+                /* Send file */
+                fd = open_file(argv[1],"r");
+                byteSend = send_file(fd,con_sockfd[i]);
+                if(byteSend <= 0)
+                    return 0;
+                break;
+            }
+
+                /* Send message */
+                // send_data(con_sockfd[i],message,strlen(message));
+                // send_data(con_sockfd[i],message2,strlen(message2));
+
+            }
+        }
+    }
+    return 1;
+}
+int run_normal_func(int server_fd, struct sockaddr *client_address, socklen_t *addrlen, char const *argv[])
+{
+    //Accept connection
+    int con_sockfd;
+    FILE *fd;
+    int byteSend =0;
+    char *message = "Hello from the server!";
+    char *message2 = "normal mode!";
+
+    if ((con_sockfd = accept(server_fd, (struct sockaddr *)client_address,
+                             (socklen_t*)addrlen)) < 0) {
+        perror("[-]refuse(accept)");
+        exit(EXIT_FAILURE);
+    }
+    printf("[+]accept connection\n");
+
+    /* Send file */
+    // send_data(con_sockfd,message,strlen(message));
+    // send_data(con_sockfd,message2,strlen(message2));
+
+    fd = open_file(argv[1],"r");
+    byteSend = send_file(fd,con_sockfd);
+    if(byteSend <=0)
+        return 0;
+    return 1;
+}
+void set_func_handler(run_func_t func_handler)
+{
+    func_general = func_handler;
+    return;
+}
+int run(int server_fd, struct sockaddr *client_address, socklen_t *addrlen, char const *argv[])
+{
+    // char *mode = argv[2]; // enter mode from terminal
+    int ret = 0;
+    // switchs(argv[2])
+    // {   
+
+    //     cases("poll")
+    //                 /* ---------------------------------------- */
+    //                 /* Sending file using poll() */
+    //     cases("select")
+    //                 /* ---------------------------------------- */
+    //                 /* Sending file using select()*/
+    //                 set_func_handler(run_server_select_func);
+    //                 break;
+    //     cases("multiprocess")
+    //     cases("multithread")
+    //     cases("normal")
+    //                 /* ---------------------------------------- */
+    //                 /* Sending file normal*/
+    //                 set_func_handler(run_normal_func);
+    //                 break;
+    //     defaults
+    //                 set_func_handler(run_normal_func);
+    // }switchs_end;
+    if(!strcmp(argv[2],"select"))
+        set_func_handler(run_server_select_func);
+    else 
+        set_func_handler(run_normal_func);
+
+    ret = func_general(server_fd,(struct sockaddr *)client_address,(socklen_t *)addrlen,argv);
+    return ret;
+
+}
 int main(int argc, char const *argv[])
 {
     int server_fd, con_sockfd;
@@ -233,8 +392,8 @@ int main(int argc, char const *argv[])
     char *filename = "test.txt";
     // Method 2: Using argument
     char IPv4Str[INET_ADDRSTRLEN];
-    FILE *fd;
-    int byteSend =0;
+    // FILE *fd;
+    char *mode;
 
 
     // Creating socket file descriptor
@@ -272,22 +431,9 @@ int main(int argc, char const *argv[])
     }
     printf("[+]Listening...\n");
 
-    /* ---------------------------------------- */
-    /* Sending file normal*/
-    //Accept connection
-    if ((con_sockfd = accept(server_fd, (struct sockaddr *)&client_address,
-                             (socklen_t*)&addrlen)) < 0) {
-        perror("[-]refuse(accept)");
-        exit(EXIT_FAILURE);
-    }
-    printf("[+]accept connection\n");
+    //Run program
 
-    /* Send file */
-    fd = open_file(argv[1],"r");
-    byteSend = send_file(fd,con_sockfd);
-
-    /* ---------------------------------------- */
-    /* Sending file using select()*/
+    run(server_fd,(struct sockaddr *)&client_address,(socklen_t*)&addrlen,argv);
 
     //print information
     inet_ntop(AF_INET,&(client_address.sin_addr),IPv4Str,INET_ADDRSTRLEN);

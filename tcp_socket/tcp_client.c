@@ -228,7 +228,8 @@ int main(int argc, char const *argv[])
     FILE *fd;
     char IPv4Str[INET_ADDRSTRLEN] = LOOPBACK_ADDRESS;//loopback address
     char IPv4Str2[INET_ADDRSTRLEN] = SERVER_55_ADDRESS;//server address (using default). May be using argument
-
+    char *buf = malloc(100 * sizeof(char));
+    int byteRead;
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         printf("\n Socket creation error \n");
         return -1;
@@ -238,7 +239,7 @@ int main(int argc, char const *argv[])
     server_address.sin_port = htons(PORT);
 
     // Convert IPv4 and IPv6 addresses from text to binary form
-    if(inet_pton(AF_INET, IPv4Str2, &server_address.sin_addr)<=0) {
+    if(inet_pton(AF_INET, IPv4Str, &server_address.sin_addr)<=0) {
         printf("\nInvalid address/ Address not supported \n");
         return -1;
     }
@@ -247,6 +248,24 @@ int main(int argc, char const *argv[])
         printf("\nConnection Failed \n");
         return -1;
     }
+    //Receive first message
+    // byteRead = recv(sockfd,buf,100,0);
+    // if(byteRead < 0)
+    // {
+    //     perror("error when receiving messages!\n");
+    //     exit(EXIT_FAILURE);
+    // }
+    // printf("1st Message from server:\n %s\n",buf);
+
+    // byteRead = recv(sockfd,buf,100,0);
+    // printf("2nd Message from server:\n %s\n",buf);
+    // if(byteRead < 0)
+    // {
+    //     perror("error when receiving messages!\n");
+    //     exit(EXIT_FAILURE);
+    // }
+
+
     fd = open_file("recv_tcptest.txt","w");
     // printf("fd:%d\n",fd);
     if((receive_file(fd,sockfd)) < 1)
